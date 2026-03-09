@@ -79,7 +79,7 @@
     <video id="sharedScreen" autoplay playsinline></video>
   </div>
 
-  <script>
+<script>
     const roomIdInput = document.getElementById('roomId');
     const hostBtn = document.getElementById('hostBtn');
     const joinBtn = document.getElementById('joinBtn');
@@ -91,34 +91,49 @@
     let peer;
     let localStream;
 
+    // Use Google's free STUN servers to help bypass network firewalls
+    const peerConfig = {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      }
+    };
+
     // --- HOST LOGIC ---
     hostBtn.addEventListener('click', async () => {
       const roomId = roomIdInput.value.trim();
       if (!roomId) return alert('Please enter a Room ID');
 
       try {
-        // 1. Get screen stream
+        statusText.innerText = 'Status: Asking for screen permission...';
         localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
         video.srcObject = localStream;
         videoContainer.style.display = 'block';
         pipBtn.disabled = false;
 
-        // 2. Create a peer with the specific Room ID
-        peer = new Peer(roomId);
+        peer = new Peer(roomId, peerConfig);
         
         peer.on('open', id => {
           statusText.innerText = `Status: Hosting room "${id}". Waiting for friend...`;
+          console.log('Room opened with ID:', id);
         });
 
-        // 3. When a friend connects to the room, call them and send the screen
         peer.on('connection', conn => {
           statusText.innerText = `Status: Friend connected! Sending screen...`;
+          console.log('Friend connected via data channel. Calling them...');
           peer.call(conn.peer, localStream);
         });
 
+        peer.on('error', err => {
+          statusText.innerText = `Error: ${err.type}`;
+          console.error('PeerJS Error:', err);
+        });
+
       } catch (err) {
-        console.error(err);
-        statusText.innerText = 'Error: Could not share screen.';
+        console.error("Screen share error:", err);
+        statusText.innerText = 'Error: Could not share screen. Check console.';
       }
     });
 
@@ -127,28 +142,38 @@
       const roomId = roomIdInput.value.trim();
       if (!roomId) return alert('Please enter a Room ID');
 
-      // 1. Create a peer with a random ID
-      peer = new Peer();
+      statusText.innerText = 'Status: Connecting to server...';
+      peer = new Peer(peerConfig);
       
       peer.on('open', id => {
         statusText.innerText = `Status: Joining room "${roomId}"...`;
-        // 2. Connect to the Host's Room ID
-        peer.connect(roomId);
+        console.log('My guest ID is:', id);
+        
+        const conn = peer.connect(roomId);
+        conn.on('open', () => {
+            console.log('Successfully connected to host!');
+        });
       });
 
-      // 3. Answer the incoming screen share call
       peer.on('call', call => {
-        call.answer(); // Answer without sending our own stream
+        console.log('Receiving screen share call...');
+        call.answer(); 
         call.on('stream', remoteStream => {
           statusText.innerText = `Status: Viewing screen!`;
+          console.log('Got video stream!');
           video.srcObject = remoteStream;
           videoContainer.style.display = 'block';
           pipBtn.disabled = false;
         });
       });
+
+      peer.on('error', err => {
+        statusText.innerText = `Error: ${err.type}`;
+        console.error('PeerJS Error:', err);
+      });
     });
 
-    // --- PICTURE IN PICTURE LOGIC ---
+    // --- PICTURE IN PICTURE & DRAG LOGIC REMAINS THE SAME ---
     pipBtn.addEventListener('click', async () => {
       try {
         if (document.pictureInPictureElement) {
@@ -156,33 +181,24 @@
         } else {
           await video.requestPictureInPicture();
         }
-      } catch (err) {
-        console.error("PiP failed:", err);
-        alert("Picture-in-Picture is not supported or failed to start.");
-      }
+      } catch (err) { console.error("PiP failed:", err); }
     });
 
-    // --- DRAGGABLE WINDOW LOGIC ---
-    let isDragging = false;
-    let offsetX, offsetY;
-
+    let isDragging = false, offsetX, offsetY;
     videoContainer.addEventListener('mousedown', (e) => {
       isDragging = true;
       offsetX = e.clientX - videoContainer.offsetLeft;
       offsetY = e.clientY - videoContainer.offsetTop;
     });
-
     document.addEventListener('mousemove', (e) => {
       if (isDragging) {
         videoContainer.style.left = `${e.clientX - offsetX}px`;
         videoContainer.style.top = `${e.clientY - offsetY}px`;
-        videoContainer.style.right = 'auto'; // Reset right alignment once dragged
+        videoContainer.style.right = 'auto'; 
       }
     });
-
-    document.addEventListener('mouseup', () => {
-      isDragging = false;
-    });
+    document.addEventListener('mouseup', () => isDragging = false);
   </script>
 </body>
+
 </html>
