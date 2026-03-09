@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2P Screen Share</title>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: #f4f4f9;
+      padding: 20px;
+    }
+    .controls {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      max-width: 400px;
+      margin-bottom: 20px;
+    }
+    input, button {
+      padding: 10px;
+      margin: 5px 0;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    button {
+      cursor: pointer;
+      background-color: #0066ff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+    }
+    button:hover { background-color: #005ce6; }
+    button:disabled { background-color: #ccc; cursor: not-allowed; }
+    
+    /* Draggable Video Container Styles */
+    #videoContainer {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 600px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      cursor: grab;
+      display: none; /* Hidden until stream starts */
+    }
+    #videoContainer:active { cursor: grabbing; }
+    #dragHandle {
+      background: #333;
+      color: white;
+      padding: 5px;
+      text-align: center;
+      font-size: 12px;
+      user-select: none;
+    }
+    video {
+      width: 100%;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="controls">
+    <h3>Screen Share Room</h3>
+    <input type="text" id="roomId" placeholder="Enter Room ID (e.g., my-secret-room-123)">
+    <button id="hostBtn">Host Room & Share Screen</button>
+    <button id="joinBtn">Join Room</button>
+    <button id="pipBtn" disabled>Toggle Picture-in-Picture</button>
+    <p id="status">Status: Waiting...</p>
+  </div>
+
+  <div id="videoContainer">
+    <div id="dragHandle">Drag me</div>
+    <video id="sharedScreen" autoplay playsinline></video>
+  </div>
+
+  <script>
+    const roomIdInput = document.getElementById('roomId');
+    const hostBtn = document.getElementById('hostBtn');
+    const joinBtn = document.getElementById('joinBtn');
+    const pipBtn = document.getElementById('pipBtn');
+    const statusText = document.getElementById('status');
+    const video = document.getElementById('sharedScreen');
+    const videoContainer = document.getElementById('videoContainer');
+
+    let peer;
+    let localStream;
+
+    // --- HOST LOGIC ---
+    hostBtn.addEventListener('click', async () => {
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) return alert('Please enter a Room ID');
+
+      try {
+        // 1. Get screen stream
+        localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        video.srcObject = localStream;
+        videoContainer.style.display = 'block';
+        pipBtn.disabled = false;
+
+        // 2. Create a peer with the specific Room ID
+        peer = new Peer(roomId);
+        
+        peer.on('open', id => {
+          statusText.innerText = `Status: Hosting room "${id}". Waiting for friend...`;
+        });
+
+        // 3. When a friend connects to the room, call them and send the screen
+        peer.on('connection', conn => {
+          statusText.innerText = `Status: Friend connected! Sending screen...`;
+          peer.call(conn.peer, localStream);
+        });
+
+      } catch (err) {
+        console.error(err);
+        statusText.innerText = 'Error: Could not share screen.';
+      }
+    });
+
+    // --- JOIN LOGIC ---
+    joinBtn.addEventListener('click', () => {
+      const roomId = roomIdInput.value.trim();
+      if (!roomId) return alert('Please enter a Room ID');
+
+      // 1. Create a peer with a random ID
+      peer = new Peer();
+      
+      peer.on('open', id => {
+        statusText.innerText = `Status: Joining room "${roomId}"...`;
+        // 2. Connect to the Host's Room ID
+        peer.connect(roomId);
+      });
+
+      // 3. Answer the incoming screen share call
+      peer.on('call', call => {
+        call.answer(); // Answer without sending our own stream
+        call.on('stream', remoteStream => {
+          statusText.innerText = `Status: Viewing screen!`;
+          video.srcObject = remoteStream;
+          videoContainer.style.display = 'block';
+          pipBtn.disabled = false;
+        });
+      });
+    });
+
+    // --- PICTURE IN PICTURE LOGIC ---
+    pipBtn.addEventListener('click', async () => {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await video.requestPictureInPicture();
+        }
+      } catch (err) {
+        console.error("PiP failed:", err);
+        alert("Picture-in-Picture is not supported or failed to start.");
+      }
+    });
+
+    // --- DRAGGABLE WINDOW LOGIC ---
+    let isDragging = false;
+    let offsetX, offsetY;
+
+    videoContainer.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      offsetX = e.clientX - videoContainer.offsetLeft;
+      offsetY = e.clientY - videoContainer.offsetTop;
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        videoContainer.style.left = `${e.clientX - offsetX}px`;
+        videoContainer.style.top = `${e.clientY - offsetY}px`;
+        videoContainer.style.right = 'auto'; // Reset right alignment once dragged
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+  </script>
+</body>
+</html>
