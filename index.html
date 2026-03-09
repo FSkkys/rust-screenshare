@@ -3,83 +3,95 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>P2P Screen Share</title>
+  <title>Screen Share Pro</title>
   <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <style>
     body {
-      font-family: system-ui, -apple-system, sans-serif;
-      background-color: #f4f4f9;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #0f172a;
+      color: white;
       padding: 20px;
+      margin: 0;
     }
     .controls {
-      background: white;
-      padding: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      background: #1e293b;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
       max-width: 400px;
-      margin-bottom: 20px;
+      margin: 0 auto;
     }
-    input, button {
-      padding: 10px;
-      margin: 5px 0;
+    input {
+      padding: 12px;
+      margin: 10px 0;
       width: 100%;
       box-sizing: border-box;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: white;
     }
     button {
+      padding: 12px;
+      margin: 5px 0;
+      width: 100%;
       cursor: pointer;
-      background-color: #0066ff;
+      background-color: #3b82f6;
       color: white;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
+      font-weight: bold;
+      transition: background 0.2s;
     }
-    button:hover { background-color: #005ce6; }
-    button:disabled { background-color: #ccc; cursor: not-allowed; }
-    
-    /* Draggable Video Container Styles */
+    button:hover { background-color: #2563eb; }
+    button:disabled { background-color: #475569; cursor: not-allowed; }
+    #status { font-size: 0.9rem; color: #94a3b8; margin-top: 15px; }
+
+    /* Draggable Window */
     #videoContainer {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      width: 600px;
+      position: fixed;
+      top: 50px;
+      left: 50px;
+      width: 480px;
       background: #000;
       border-radius: 8px;
       overflow: hidden;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.8);
       cursor: grab;
-      display: none; /* Hidden until stream starts */
+      display: none;
+      z-index: 9999;
+      border: 2px solid #3b82f6;
     }
     #videoContainer:active { cursor: grabbing; }
     #dragHandle {
-      background: #333;
+      background: #3b82f6;
       color: white;
       padding: 5px;
       text-align: center;
-      font-size: 12px;
-      user-select: none;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
     }
-    video {
-      width: 100%;
-      display: block;
-    }
+    video { width: 100%; display: block; background: black; }
   </style>
 </head>
 <body>
 
   <div class="controls">
-    <h3>Screen Share Room</h3>
-    <input type="text" id="roomId" placeholder="Enter Room ID (e.g., my-secret-room-123)">
-    <button id="hostBtn">Host Room & Share Screen</button>
+    <h2 style="margin-top:0">Screen Share</h2>
+    <input type="text" id="roomId" placeholder="Create or Enter Room ID">
+    <button id="hostBtn">Start Sharing</button>
     <button id="joinBtn">Join Room</button>
-    <button id="pipBtn" disabled>Toggle Picture-in-Picture</button>
-    <p id="status">Status: Waiting...</p>
+    <button id="pipBtn" disabled>Pop Out (PiP)</button>
+    <p id="status">Status: Ready</p>
   </div>
 
   <div id="videoContainer">
-    <div id="dragHandle">Drag me</div>
-    <video id="sharedScreen" autoplay playsinline></video>
+    <div id="dragHandle">Click & Drag to Move</div>
+    <video id="sharedScreen" autoplay playsinline muted></video>
   </div>
 
-<script>
+  <script>
     const roomIdInput = document.getElementById('roomId');
     const hostBtn = document.getElementById('hostBtn');
     const joinBtn = document.getElementById('joinBtn');
@@ -91,114 +103,115 @@
     let peer;
     let localStream;
 
-    // Use Google's free STUN servers to help bypass network firewalls
+    // Google STUN servers help bypass NAT/Firewalls
     const peerConfig = {
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
+        'iceServers': [
+          { 'urls': 'stun:stun.l.google.com:19302' },
+          { 'urls': 'stun:stun1.l.google.com:19302' }
         ]
       }
     };
 
+    function handleStream(stream) {
+      video.srcObject = stream;
+      videoContainer.style.display = 'block';
+      pipBtn.disabled = false;
+      
+      // Force play to prevent black screen
+      video.play().catch(e => console.error("Playback failed", e));
+    }
+
     // --- HOST LOGIC ---
     hostBtn.addEventListener('click', async () => {
-      const roomId = roomIdInput.value.trim();
-      if (!roomId) return alert('Please enter a Room ID');
+      const id = roomIdInput.value.trim();
+      if (!id) return alert('Enter a Room ID');
 
       try {
-        statusText.innerText = 'Status: Asking for screen permission...';
-        localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-        video.srcObject = localStream;
-        videoContainer.style.display = 'block';
-        pipBtn.disabled = false;
-
-        peer = new Peer(roomId, peerConfig);
+        localStream = await navigator.mediaDevices.getDisplayMedia({ 
+          video: true, 
+          audio: true 
+        });
         
-        peer.on('open', id => {
-          statusText.innerText = `Status: Hosting room "${id}". Waiting for friend...`;
-          console.log('Room opened with ID:', id);
+        handleStream(localStream);
+        peer = new Peer(id, peerConfig);
+
+        peer.on('open', () => {
+          statusText.innerText = `Status: Hosting room "${id}"`;
         });
 
-        peer.on('connection', conn => {
-          statusText.innerText = `Status: Friend connected! Sending screen...`;
-          console.log('Friend connected via data channel. Calling them...');
-          peer.call(conn.peer, localStream);
+        peer.on('connection', (conn) => {
+          statusText.innerText = "Status: Friend connected. Sending data...";
+          setTimeout(() => {
+            peer.call(conn.peer, localStream);
+          }, 1000);
         });
 
-        peer.on('error', err => {
+        peer.on('error', (err) => {
           statusText.innerText = `Error: ${err.type}`;
-          console.error('PeerJS Error:', err);
+          console.error(err);
         });
 
       } catch (err) {
-        console.error("Screen share error:", err);
-        statusText.innerText = 'Error: Could not share screen. Check console.';
+        statusText.innerText = "Status: Permission denied or cancelled.";
       }
     });
 
     // --- JOIN LOGIC ---
     joinBtn.addEventListener('click', () => {
-      const roomId = roomIdInput.value.trim();
-      if (!roomId) return alert('Please enter a Room ID');
+      const id = roomIdInput.value.trim();
+      if (!id) return alert('Enter a Room ID');
 
-      statusText.innerText = 'Status: Connecting to server...';
       peer = new Peer(peerConfig);
       
-      peer.on('open', id => {
-        statusText.innerText = `Status: Joining room "${roomId}"...`;
-        console.log('My guest ID is:', id);
-        
-        const conn = peer.connect(roomId);
-        conn.on('open', () => {
-            console.log('Successfully connected to host!');
+      peer.on('open', () => {
+        statusText.innerText = `Status: Connecting to ${id}...`;
+        peer.connect(id);
+      });
+
+      peer.on('call', (call) => {
+        call.answer();
+        call.on('stream', (remoteStream) => {
+          statusText.innerText = "Status: Stream Active!";
+          handleStream(remoteStream);
         });
       });
 
-      peer.on('call', call => {
-        console.log('Receiving screen share call...');
-        call.answer(); 
-        call.on('stream', remoteStream => {
-          statusText.innerText = `Status: Viewing screen!`;
-          console.log('Got video stream!');
-          video.srcObject = remoteStream;
-          videoContainer.style.display = 'block';
-          pipBtn.disabled = false;
-        });
-      });
-
-      peer.on('error', err => {
+      peer.on('error', (err) => {
         statusText.innerText = `Error: ${err.type}`;
-        console.error('PeerJS Error:', err);
+        console.error(err);
       });
     });
 
-    // --- PICTURE IN PICTURE & DRAG LOGIC REMAINS THE SAME ---
+    // --- PiP LOGIC ---
     pipBtn.addEventListener('click', async () => {
-      try {
-        if (document.pictureInPictureElement) {
-          await document.exitPictureInPicture();
-        } else {
-          await video.requestPictureInPicture();
-        }
-      } catch (err) { console.error("PiP failed:", err); }
-    });
-
-    let isDragging = false, offsetX, offsetY;
-    videoContainer.addEventListener('mousedown', (e) => {
-      isDragging = true;
-      offsetX = e.clientX - videoContainer.offsetLeft;
-      offsetY = e.clientY - videoContainer.offsetTop;
-    });
-    document.addEventListener('mousemove', (e) => {
-      if (isDragging) {
-        videoContainer.style.left = `${e.clientX - offsetX}px`;
-        videoContainer.style.top = `${e.clientY - offsetY}px`;
-        videoContainer.style.right = 'auto'; 
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        await video.requestPictureInPicture();
       }
     });
-    document.addEventListener('mouseup', () => isDragging = false);
+
+    // --- DRAG LOGIC ---
+    let isDragging = false;
+    let offset = [0,0];
+    videoContainer.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      offset = [
+        videoContainer.offsetLeft - e.clientX,
+        videoContainer.offsetTop - e.clientY
+      ];
+    }, true);
+
+    document.addEventListener('mouseup', () => { isDragging = false; }, true);
+
+    document.addEventListener('mousemove', (event) => {
+      event.preventDefault();
+      if (isDragging) {
+        videoContainer.style.left = (event.clientX + offset[0]) + 'px';
+        videoContainer.style.top  = (event.clientY + offset[1]) + 'px';
+      }
+    }, true);
   </script>
 </body>
-
 </html>
